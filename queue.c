@@ -2,9 +2,9 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <stdio.h>
 
-queue *queue_init()
-{
+queue *queue_init() {
   queue *q = malloc(sizeof(queue));
   if (!q) {
     return NULL;
@@ -22,10 +22,6 @@ int queue_push(queue *q, void *data) {
     return -1;
   }
 
-  new_node->data = malloc(sizeof(data));
-
-  assert(new_node->data);
-
   new_node->next = NULL;
 
   new_node->data = data;
@@ -40,6 +36,7 @@ int queue_push(queue *q, void *data) {
   }
 
   (q->size)++;
+  printf("pushed\n");
   return 0;
 }
 
@@ -56,8 +53,9 @@ void *queue_pop(queue *q) {
       q->tail = NULL;
     }
 
-    q->size--;
+    (q->size)--;
     free(temp);
+    printf("pop\n");
     return data;
   }
   return NULL;
@@ -70,7 +68,7 @@ void queue_clear(queue *q) {
     temp = q->head;
     q->head = temp->next;
     free(temp);
-    q->size--;
+    (q->size)--;
   }
 
   q->head = NULL;

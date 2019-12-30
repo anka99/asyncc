@@ -1,6 +1,7 @@
 #include "threadpool.h"
 #include <stdlib.h>
 #include <assert.h>
+#include <stdio.h>
 
 void *process(void *data) {
   assert(data);
@@ -8,33 +9,36 @@ void *process(void *data) {
   while (true) {
     pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
 
-    if (queue_size(pool->runnables) == 0) {
+    while (queue_size(pool->runnables) == 0) {
       pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
       sem_wait(&(pool->runnables_semaphore)); //TODO: error
       pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
+
+      if (pool->end && queue_size(pool->runnables) == 0) {
+        pthread_mutex_unlock(&(pool->queue_mutex));
+        break;
+      }
     }
 
     if (pool->end && queue_size(pool->runnables) == 0) {
       pthread_mutex_unlock(&(pool->queue_mutex));
       break;
     }
+
     runnable_t *runnable = queue_pop(pool->runnables);
 
     pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
 
-    runnable->function(runnable->arg, runnable->argsz);
+    (runnable->function)(runnable->arg, runnable->argsz);
+
+    free(runnable);
   }
   return 0;
 }
 
 int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
-  if (!(pool = malloc(sizeof(thread_pool_t)))) {
-    thread_pool_destroy(pool);
-    return -1;
-  }
   pool->size = num_threads;
   pool->end = false;
-  pool->attr = NULL;
 
   if (!(pool->runnables = queue_init())) {
     thread_pool_destroy(pool);
@@ -53,22 +57,7 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
     return result;
   }
 
-  result = pthread_mutex_init(&(pool->empty_queue_mutex), 0);
-  if (result != 0) {
-    thread_pool_destroy(pool);
-    return result;
-  }
-
-  result = pthread_attr_init(pool->attr);
-  if (result != 0) {
-    return result;
-  }
-
-  pool->runnables = queue_init();
-  if (!(pool->runnables)) {
-    thread_pool_destroy(pool);
-    return -1;
-  }
+  pool->attr = malloc(sizeof(pthread_attr_t)); //TODO: error
 
   pool->threads = malloc(pool->size * sizeof(pthread_t *));
 
@@ -85,6 +74,7 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
   }
 
   for (size_t i = 0; i < pool->size; i++) {
+    pool->threads[i] = malloc(sizeof(pthread_t)); //TODO: error
     result = pthread_create(pool->threads[i], pool->attr, process, pool);
     if (result != 0) {
       thread_pool_destroy(pool);
@@ -98,7 +88,6 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
 void thread_pool_destroy(struct thread_pool *pool) {
   int err = 0;
   pool->end = true;
-  //err = pthread_mutex_lock(&(pool->empty_queue_mutex));
 
   if (pool->threads) {
     for (size_t i = 0; i < pool->size; i++) {
@@ -106,26 +95,30 @@ void thread_pool_destroy(struct thread_pool *pool) {
     }
 
     for (size_t i = 0; i < pool->size; i++) {
-      err = pthread_join(*(pool->threads[i]), NULL);
-      if (err != 0) {
-        //TODO do sth; co jeśli wątek nie powstał?
+      if (pool->threads[i]) {
+        err = pthread_join(*(pool->threads[i]), NULL);
+        if (err != 0) {
+          //TODO do sth; co jeśli wątek nie powstał?
+        }
+        free(pool->threads[i]);
       }
     }
     free(pool->threads);
   }
 
+  err = pthread_attr_destroy(pool->attr);
+
   if (pool->attr) {
-    err = pthread_attr_destroy(pool->attr);
-    if (err != 0) {
-      //TODO: do sth
-    }
+    free(pool->attr);
   }
+  if (err != 0) {
+    //TODO: do sth
+  }
+
 
   queue_destroy(pool->runnables);
 
   pthread_mutex_destroy(&(pool->queue_mutex));
-
-  pthread_mutex_destroy(&(pool->empty_queue_mutex));
 
   sem_destroy(&(pool->runnables_semaphore));
 }
@@ -133,9 +126,17 @@ void thread_pool_destroy(struct thread_pool *pool) {
 int defer(struct thread_pool *pool, runnable_t runnable) {
   assert(pool);
   assert(!pool->end);
+
+  runnable_t *runnable_pointer = malloc(sizeof(runnable_t)); //TODO: error
+  assert(runnable_pointer != NULL);
+  runnable_pointer->arg = runnable.arg;
+  runnable_pointer->argsz = runnable.argsz;
+  runnable_pointer->function = runnable.function;
+
   pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
-  queue_push(pool->runnables, &runnable); //TODO :error
+  queue_push(pool->runnables, runnable_pointer); //TODO: error
   sem_post(&(pool->runnables_semaphore)); //TODO: error
   pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
+
   return 0;
 }

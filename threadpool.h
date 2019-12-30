@@ -16,7 +16,6 @@ typedef struct runnable {
 typedef struct thread_pool {
   bool end;
   pthread_attr_t *attr;
-  pthread_mutex_t empty_queue_mutex; //mutex do czekania na pustą kolejkę
   size_t size; //liczba wątków
   queue *runnables; //kolejka zadań
   pthread_mutex_t queue_mutex; //ochrona kolejki
