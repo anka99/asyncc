@@ -13,7 +13,7 @@ typedef struct future {
   void *result;
   size_t result_size;
   callable_t *callable;
-  pthread_mutex_t mutex;
+  sem_t mutex;
 } future_t;
 
 int async(thread_pool_t *pool, future_t *future, callable_t callable);

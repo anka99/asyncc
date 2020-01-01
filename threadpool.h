@@ -18,7 +18,7 @@ typedef struct thread_pool {
   pthread_attr_t *attr;
   size_t size; //liczba wątków
   queue *runnables; //kolejka zadań
-  pthread_mutex_t queue_mutex; //ochrona kolejki
+  sem_t queue_mutex; //ochrona kolejki
   sem_t runnables_semaphore; //semafor na zadania
   pthread_t **threads; //tablica wątków
 } thread_pool_t;

@@ -7,27 +7,27 @@ void *process(void *data) {
   assert(data);
   thread_pool_t *pool = (thread_pool_t *)(data);
   while (true) {
-    pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
+    sem_wait(&(pool->queue_mutex)); // TODO: error
 
     while (queue_size(pool->runnables) == 0) {
-      pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
+      sem_post(&(pool->queue_mutex)); //TODO: error
       sem_wait(&(pool->runnables_semaphore)); //TODO: error
-      pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
+      sem_wait(&(pool->queue_mutex)); // TODO: error
 
       if (pool->end && queue_size(pool->runnables) == 0) {
-        pthread_mutex_unlock(&(pool->queue_mutex));
+        sem_post(&(pool->queue_mutex));
         break;
       }
     }
 
     if (pool->end && queue_size(pool->runnables) == 0) {
-      pthread_mutex_unlock(&(pool->queue_mutex));
+      sem_post(&(pool->queue_mutex));
       break;
     }
 
     runnable_t *runnable = queue_pop(pool->runnables);
 
-    pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
+    sem_post(&(pool->queue_mutex)); //TODO: error
 
     (runnable->function)(runnable->arg, runnable->argsz);
 
@@ -45,13 +45,13 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
     return -1;
   }
 
-  int result = pthread_mutex_init(&(pool->queue_mutex), 0);
+  int result = sem_init(&(pool->queue_mutex), 0, 1);
   if (result != 0) {
     thread_pool_destroy(pool);
     return result;
   }
 
-  result = sem_init(&(pool->runnables_semaphore), 1, 0);
+  result = sem_init(&(pool->runnables_semaphore), 0, 0);
   if (result != 0) {
     thread_pool_destroy(pool);
     return result;
@@ -118,7 +118,7 @@ void thread_pool_destroy(struct thread_pool *pool) {
 
   queue_destroy(pool->runnables);
 
-  pthread_mutex_destroy(&(pool->queue_mutex));
+  sem_destroy(&(pool->queue_mutex));
 
   sem_destroy(&(pool->runnables_semaphore));
 }
@@ -133,10 +133,10 @@ int defer(struct thread_pool *pool, runnable_t runnable) {
   runnable_pointer->argsz = runnable.argsz;
   runnable_pointer->function = runnable.function;
 
-  pthread_mutex_lock(&(pool->queue_mutex)); // TODO: error
+  sem_wait(&(pool->queue_mutex)); // TODO: error
   queue_push(pool->runnables, runnable_pointer); //TODO: error
   sem_post(&(pool->runnables_semaphore)); //TODO: error
-  pthread_mutex_unlock(&(pool->queue_mutex)); //TODO: error
+  sem_post(&(pool->queue_mutex)); //TODO: error
 
   return 0;
 }
