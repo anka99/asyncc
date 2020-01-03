@@ -36,7 +36,7 @@ int queue_push(queue *q, void *data) {
   }
 
   (q->size)++;
-  printf("pushed\n");
+  //printf("pushed\n");
   return 0;
 }
 
@@ -55,7 +55,7 @@ void *queue_pop(queue *q) {
 
     (q->size)--;
     free(temp);
-    printf("pop\n");
+    //printf("pop\n");
     return data;
   }
   return NULL;

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+//#include <zconf.h>
 
 #include "threadpool.h"
 
@@ -20,9 +21,16 @@ void function(void *args, size_t size) {
 
   data_t *data = (data_t *) (args);
   usleep(1000 * (data->time));
-  sem_wait(data->mutex);
+
+  if (sem_wait(data->mutex)) {
+    exit(1);
+  }
+
   *(data->result) += data->value;
-  sem_post(data->mutex);
+  if (sem_post(data->mutex)) {
+    exit(1);
+  }
+
   free(data);
 }
 
@@ -33,15 +41,29 @@ int main(void) {
   int k, n;
   scanf("%d %d", &k, &n);
 
-  int *results = malloc(k * sizeof(int64_t));//TODO: error
+  int *results = malloc(k * sizeof(int64_t));
+  if (!results) {
+    thread_pool_destroy(&pool);
+    return -1;
+  }//TODO: error
 
   for (int i = 0; i < k; i++) {
     results[i] = 0;
   }
+
   sem_t *mutex_array = malloc(k * sizeof(sem_t));
+  if (!mutex_array) {
+    thread_pool_destroy(&pool);
+    free(results);
+    return -1;
+  }
 
   for (int i = 0; i < k; i++) {
-    sem_init(&(mutex_array[i]), 0, 1); //TODO: error
+    if (sem_init(&(mutex_array[i]), 0, 1)) {
+      thread_pool_destroy(&pool);
+      free(results);
+      return -1;
+    } //TODO: check error
   }
 
   int row = 0;
@@ -52,6 +74,12 @@ int main(void) {
     scanf("%d %d", &v, &t);
 
     data_t *data = malloc(sizeof(data_t)); //TODO: error
+    if (!data) {
+      thread_pool_destroy(&pool);
+      free(results);
+      return -1;
+    }
+
     data->mutex = &(mutex_array[row]);
     data->value = v;
     data->time = t;
@@ -62,14 +90,23 @@ int main(void) {
     runnable.argsz = sizeof(data_t);
     runnable.function = function;
 
-    defer(&pool, runnable); //TODO: error
+    if (defer(&pool, runnable) != 0) {
+      free(data);
+      thread_pool_destroy(&pool);
+      free(results);
+      return -1;
+    } //TODO: check error
   }
 
   thread_pool_destroy(&pool);
 
   for (int i = 0; i < k; i++) {
     printf("%d\n", results[i]);
-    sem_destroy(&(mutex_array[i]));
+    if (sem_destroy(&(mutex_array[i]))) {
+      thread_pool_destroy(&pool);
+      free(results);
+      return -1;
+    } //TODO: check error
   }
 
   free(mutex_array);

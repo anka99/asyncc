@@ -1,8 +1,24 @@
 #include "future.h"
 #include <stdlib.h>
 #include <assert.h>
+#include <stdio.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <string.h>
 
 typedef void *(*function_t)(void *);
+
+void syserr(const char *fmt, ...) {
+  va_list fmt_args;
+
+  fprintf(stderr, "ERROR: ");
+
+  va_start(fmt_args, fmt);
+  vfprintf(stderr, fmt, fmt_args);
+  va_end (fmt_args);
+  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
+  exit(1);
+}
 
 void function(void *args, size_t size) {
   future_t *future = (future_t *)(args);
@@ -10,7 +26,9 @@ void function(void *args, size_t size) {
           future->callable->argsz, &(future->result_size));
 
   free(future->callable);
-  sem_post(&(future->mutex)); //TODO: error
+  if (sem_post(&(future->mutex))) {
+    syserr("sem_post");
+  } //TODO: check error
 }
 
 int async(thread_pool_t *pool, future_t *future, callable_t callable) {
@@ -18,23 +36,33 @@ int async(thread_pool_t *pool, future_t *future, callable_t callable) {
 
   runnable_t runnable;
 
-  callable_t *callable_pointer = malloc(sizeof(callable_t)); //TODO: error
+  callable_t *callable_pointer = malloc(sizeof(callable_t));
+  if (!callable_pointer) {
+    return -1;
+  }//TODO: check error
 
   callable_pointer->function = callable.function;
   callable_pointer->arg = callable.arg;
   callable_pointer->argsz = callable.argsz;
 
   future->callable = callable_pointer;
-  sem_init(&(future->mutex), 0, 0); //TODO: error
+  err = sem_init(&(future->mutex), 0, 0);
+  if (err != 0) {
+    free(callable_pointer);
+    return err;
+  }//TODO: check error
 
   runnable.arg = future;
   assert(sizeof(future_t) == sizeof(*future));
 
   runnable.argsz = sizeof(future_t); //TODO: być może zainicjalizowane
 
-  runnable.function = function; //TODO: być może z &
+  runnable.function = function;
 
   err = defer(pool, runnable);
+  if (err != 0) {
+    free(callable_pointer);
+  }
 
   return err;
 }
@@ -44,21 +72,34 @@ void function_map(void *args, size_t size) {
 
   future_t *from = (future_t *)(future->callable->arg);
 
-  void *result = await(from); //TODO: error
+  void *result = await(from);
+  if (!result) {
+    syserr("malloc");
+  }
 
   future->result = future->callable->function(result, future->callable->argsz,
           &(future->result_size));
 
   free(future->callable);
-  sem_post(&(future->mutex)); //TODO: error
+  if (sem_post(&(future->mutex))) {
+    syserr("sem_post");
+  } //TODO: check error
 }
 
 int map(thread_pool_t *pool, future_t *future, future_t *from,
         void *(*function)(void *, size_t, size_t *)) {
   int err = 0;
-  err = sem_init(&(future->mutex), 0, 0); //TODO: error
+
+  err = sem_init(&(future->mutex), 0, 0);
+  if (err != 0) {
+    return err;
+  }//TODO: check error
 
   callable_t *callable = malloc(sizeof(callable_t));
+  if (!callable) {
+    return -1;
+  }
+
   callable->function = function;
   callable->arg = from;
   callable->argsz = sizeof(future_t);
@@ -68,13 +109,25 @@ int map(thread_pool_t *pool, future_t *future, future_t *from,
   runnable_t runnable;
   runnable.arg = future;
   runnable.argsz = sizeof(future_t);
-  runnable.function = function_map; //TODO: być może z &
+  runnable.function = function_map;
 
-  err = defer(pool, runnable); //TODO: error
+  err = defer(pool, runnable);
+  if (err != 0) {
+    free(callable);
+    return err;
+  }//TODO: check error
+
   return 0;
 }
 
 void *await(future_t *future) {
-  sem_wait(&(future->mutex)); //TODO: error
+  if (sem_wait(&(future->mutex))) {
+    syserr("sem_wait");
+  } //TODO: check error
+
+  if (sem_destroy(&(future->mutex))) {
+    syserr("sem_destroy");
+  } //TODO: check error
+
   return future->result;
 }

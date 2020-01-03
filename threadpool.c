@@ -2,37 +2,54 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <string.h>
+
+void syserr_silnia(const char *fmt, ...) {
+  va_list fmt_args;
+
+  fprintf(stderr, "ERROR: ");
+
+  va_start(fmt_args, fmt);
+  vfprintf(stderr, fmt, fmt_args);
+  va_end (fmt_args);
+  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
+  exit(1);
+}
 
 void *process(void *data) {
   assert(data);
   thread_pool_t *pool = (thread_pool_t *)(data);
+
   while (true) {
-    sem_wait(&(pool->queue_mutex)); // TODO: error
+    if (sem_wait(&(pool->queue_mutex))) syserr_silnia("sem_wait");// TODO: check error
 
     while (queue_size(pool->runnables) == 0) {
-      sem_post(&(pool->queue_mutex)); //TODO: error
-      sem_wait(&(pool->runnables_semaphore)); //TODO: error
-      sem_wait(&(pool->queue_mutex)); // TODO: error
+      if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post");//TODO: check error
+      if (sem_wait(&(pool->runnables_semaphore))) syserr_silnia("sem_wait"); //TODO: check error
+      if (sem_wait(&(pool->queue_mutex))) syserr_silnia("sem_wait"); // TODO: check error
 
       if (pool->end && queue_size(pool->runnables) == 0) {
-        sem_post(&(pool->queue_mutex));
+        if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post");
         break;
       }
     }
 
     if (pool->end && queue_size(pool->runnables) == 0) {
-      sem_post(&(pool->queue_mutex));
+      if (sem_post(&(pool->queue_mutex)))syserr_silnia("sem_post");
       break;
     }
 
     runnable_t *runnable = queue_pop(pool->runnables);
 
-    sem_post(&(pool->queue_mutex)); //TODO: error
+    if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post"); //TODO: check error
 
     (runnable->function)(runnable->arg, runnable->argsz);
 
     free(runnable);
   }
+
   return 0;
 }
 
@@ -57,9 +74,15 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
     return result;
   }
 
-  pool->attr = malloc(sizeof(pthread_attr_t)); //TODO: error
+  if (!(pool->attr = malloc(sizeof(pthread_attr_t)))) {
+    thread_pool_destroy(pool);
+    return result;
+  } //TODO: check error
 
-  pool->threads = malloc(pool->size * sizeof(pthread_t *));
+  if (!(pool->threads = malloc(pool->size * sizeof(pthread_t *)))) {
+    thread_pool_destroy(pool);
+    return result;
+  } //TODO: check error
 
   result = pthread_attr_init(pool->attr);
   if (result != 0) {
@@ -86,19 +109,19 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
 }
 
 void thread_pool_destroy(struct thread_pool *pool) {
-  int err = 0;
   pool->end = true;
 
   if (pool->threads) {
     for (size_t i = 0; i < pool->size; i++) {
-      sem_post(&(pool->runnables_semaphore));
+      if (sem_post(&(pool->runnables_semaphore))) {
+        syserr_silnia("sem_post");
+      } //TODO: check error
     }
 
     for (size_t i = 0; i < pool->size; i++) {
       if (pool->threads[i]) {
-        err = pthread_join(*(pool->threads[i]), NULL);
-        if (err != 0) {
-          //TODO do sth; co jeśli wątek nie powstał?
+        if (pthread_join(*(pool->threads[i]), NULL)) {
+          syserr_silnia("pthread_join");
         }
         free(pool->threads[i]);
       }
@@ -106,37 +129,64 @@ void thread_pool_destroy(struct thread_pool *pool) {
     free(pool->threads);
   }
 
-  err = pthread_attr_destroy(pool->attr);
+  if (pthread_attr_destroy(pool->attr)) {
+    syserr_silnia("pthread_attr_destroy");
+  }
 
   if (pool->attr) {
     free(pool->attr);
   }
-  if (err != 0) {
-    //TODO: do sth
-  }
-
 
   queue_destroy(pool->runnables);
 
-  sem_destroy(&(pool->queue_mutex));
+  if (sem_destroy(&(pool->queue_mutex))) {
+    syserr_silnia("sem_destroy");
+  }
 
-  sem_destroy(&(pool->runnables_semaphore));
+  if (sem_destroy(&(pool->runnables_semaphore))) {
+    syserr_silnia("sem_destroy");
+  }
 }
 
 int defer(struct thread_pool *pool, runnable_t runnable) {
   assert(pool);
-  assert(!pool->end);
+  if (pool->end) {
+    return -1;
+  }
+  int result = 0;
 
-  runnable_t *runnable_pointer = malloc(sizeof(runnable_t)); //TODO: error
-  assert(runnable_pointer != NULL);
+
+  runnable_t *runnable_pointer = malloc(sizeof(runnable_t));
+  if (!runnable_pointer) {
+    return -1;
+  }//TODO: check error
   runnable_pointer->arg = runnable.arg;
   runnable_pointer->argsz = runnable.argsz;
   runnable_pointer->function = runnable.function;
 
-  sem_wait(&(pool->queue_mutex)); // TODO: error
-  queue_push(pool->runnables, runnable_pointer); //TODO: error
-  sem_post(&(pool->runnables_semaphore)); //TODO: error
-  sem_post(&(pool->queue_mutex)); //TODO: error
+  result = sem_wait(&(pool->queue_mutex));
+  if (result != 0) {
+    free(runnable_pointer);
+    return result;
+  }
+
+  result = queue_push(pool->runnables, runnable_pointer);
+  if (result != 0) {
+    free(runnable_pointer);
+    return result;
+  } //TODO: check error
+
+  result = sem_post(&(pool->runnables_semaphore));
+  if (result != 0) {
+    free(runnable_pointer);
+    return result;
+  }//TODO: check error
+
+  result = sem_post(&(pool->queue_mutex));
+  if (result != 0) {
+    free(runnable_pointer);
+    return result;
+  }//TODO: check error
 
   return 0;
 }
