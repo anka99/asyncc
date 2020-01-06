@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 //#include <zconf.h>
 
 #include "threadpool.h"
@@ -17,7 +18,7 @@ typedef struct data {
   int value;
 } data_t;
 
-void function(void *args, size_t size) {
+void function(void *args, size_t size __attribute__((unused))) {
 
   data_t *data = (data_t *) (args);
   usleep(1000 * (data->time));

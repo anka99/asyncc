@@ -1,26 +1,12 @@
 #include "future.h"
 #include <stdlib.h>
 #include <assert.h>
-#include <stdio.h>
-#include <errno.h>
-#include <stdarg.h>
 #include <string.h>
+#include "err.h"
 
 typedef void *(*function_t)(void *);
 
-void syserr(const char *fmt, ...) {
-  va_list fmt_args;
-
-  fprintf(stderr, "ERROR: ");
-
-  va_start(fmt_args, fmt);
-  vfprintf(stderr, fmt, fmt_args);
-  va_end (fmt_args);
-  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
-  exit(1);
-}
-
-void function(void *args, size_t size) {
+void function(void *args, size_t size __attribute__((unused))) {
   future_t *future = (future_t *)(args);
   future->result = future->callable->function(future->callable->arg,
           future->callable->argsz, &(future->result_size));
@@ -67,7 +53,7 @@ int async(thread_pool_t *pool, future_t *future, callable_t callable) {
   return err;
 }
 
-void function_map(void *args, size_t size) {
+void function_map(void *args, size_t size __attribute__((unused))) {
   future_t *future = (future_t *)(args);
 
   future_t *from = (future_t *)(future->callable->arg);

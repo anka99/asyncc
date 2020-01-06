@@ -20,5 +20,6 @@ void *queue_pop(queue *q);
 void queue_clear(queue *q);
 int queue_size(queue *q);
 void queue_destroy(queue *q);
+void *queue_delete(queue *q, void *data);
 
 #endif //ASYNC_QUEUE_H

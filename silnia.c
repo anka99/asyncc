@@ -2,27 +2,16 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <signal.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <string.h>
 #include <inttypes.h>
 #include "future.h"
-
-thread_pool_t pool;
-pid_t pid;
 
 typedef struct pair {
   uint64_t first; //(n - 1)!
   uint64_t second; //n
 } pair_t;
 
-typedef struct pool_pid {
-  thread_pool_t pool;
-  pid_t pid;
-} pool_pid_t;
-
-void *multiply(void *data, size_t argsz, size_t *size) {
+void *multiply(void *data, size_t argsz __attribute__((unused)), size_t *size) {
   pair_t *pair = (pair_t *)(data);
 
   pair_t *result = malloc(sizeof(pair_t)); //TODO: error
@@ -40,33 +29,11 @@ void *multiply(void *data, size_t argsz, size_t *size) {
   return result;
 }
 
-void catch(int sig) {
-  thread_pool_destroy(&pool);
-  printf("sigint -> pool destroyed\n");
-  kill(pid, SIGINT);
-  strsignal(sig);
-}
-
 int main() {
-  pid = getpid();
+  thread_pool_t pool;
   if (thread_pool_init(&pool, 3) != 0) {
     return -1;
-  } //TODO: err
-
-  struct sigaction action;
-  sigset_t block_mask;
-
-  sigemptyset(&block_mask);
-  sigaddset(&block_mask, SIGINT);
-
-  action.sa_handler = catch;
-  action.sa_mask = block_mask;
-  action.sa_flags = SA_RESETHAND;
-
-  if (sigaction(SIGINT, &action, 0) == -1) {
-    thread_pool_destroy(&pool);
-    return -1;
-  }; //TODO: check error
+  }
 
   uint32_t n;
   scanf("%d", &n);
@@ -142,7 +109,7 @@ int main() {
     if (!result) {
       thread_pool_destroy(&pool);
       free(pair);
-      for (int j = n - 1; j >= 1; j--) {
+      for (uint32_t j = n - 1; j >= 1; j--) {
         free(future[j]);
       }
       free(future);
@@ -164,3 +131,132 @@ int main() {
 
   return 0;
 }
+
+//void *multiply(void *data, size_t argsz __attribute__((unused)), size_t *size) {
+//  pair_t *pair = (pair_t *)(data);
+//
+//  //pair_t *result = malloc(sizeof(pair_t)); //TODO: error
+//  pair_t temp = {pair->first, pair->second};
+//
+//  *size = sizeof(pair_t);
+//  pair->second = temp.second + 1;
+//
+//  pair->first = (temp.first) * (temp.second);
+//  assert(pair->first >= temp.first);
+//
+//  //free(pair);
+//  return pair;
+//}
+//
+//int main() {
+//  thread_pool_t pool;
+//  if (thread_pool_init(&pool, 3) != 0) {
+//    return -1;
+//  }
+//
+//  uint32_t n;
+//  scanf("%d", &n);
+//
+//  if (n == 0) {
+//    printf("%d\n", 1);
+//  }
+//  else if (n == 1 || n == 2) {
+//    printf("%d\n", n);
+//  }
+//  else if (n == 3) {
+//    printf("%d\n", 6);
+//  }
+//  else if (n == 4) {
+//    printf("%d\n", 24);
+//  }
+//  else {
+//    future_t *future = malloc(n * sizeof(future_t));
+//    if (!future) {
+//      thread_pool_destroy(&pool);
+//      return -1;
+//    }
+//
+//    callable_t callable1, callable2, callable3;
+//
+//    pair_t pair1 = {1, 2};
+//    pair_t pair2 = {1, 3};
+//    pair_t pair3 = {1, 4};
+//
+//    callable1.arg = &pair1;
+//    callable1.argsz = sizeof(pair_t);
+//    callable1.function = multiply;
+//
+//    callable2.arg = &pair2;
+//    callable2.argsz = sizeof(pair_t);
+//    callable3.function = multiply;
+//
+//    callable2.arg = &pair3;
+//    callable2.argsz = sizeof(pair_t);
+//    callable3.function = multiply;
+//
+//    if (async(&pool, &future[1], callable1) != 0) {
+//      thread_pool_destroy(&pool);
+//      free(future);
+//      return -1;
+//    } //TODO: check err
+//
+//    if (async(&pool, &future[2], callable2) != 0) {
+//      thread_pool_destroy(&pool);
+//      free(future);
+//      return -1;
+//    }
+//
+//    if (async(&pool, &future[3], callable3) != 0) {
+//      thread_pool_destroy(&pool);
+//      free(future);
+//      return -1;
+//    }
+//
+//    uint32_t i = 4;
+//    uint32_t j = 5;
+//    uint32_t k = 6;
+//
+//    while (i < n || j < n || k < n) {
+//
+//      if (map(&pool, &future[i], &future[i - 3], multiply) != 0) {
+//        thread_pool_destroy(&pool);
+//        free(future);
+//        return -1;
+//      }
+//
+//      if (j < n && map(&pool, &future[j], &future[j - 3], multiply) != 0) {
+//        thread_pool_destroy(&pool);
+//        free(future);
+//        return -1;
+//      }
+//
+//      if (k < n && map(&pool, &future[k], &future[k - 3], multiply) != 0) {
+//        thread_pool_destroy(&pool);
+//        free(future);
+//        return -1;
+//      }
+//      i++;
+//      j++;
+//      k++;
+//    }
+//
+//    pair_t *result1 = await(&future[n - 1]);
+//    pair_t *result2 = await(&future[n - 2]);
+//    pair_t *result3 = await(&future[n - 3]);
+//
+//    if (!result1 || !result2 || !result3) {
+//      thread_pool_destroy(&pool);
+//      free(future);
+//      return -1;
+//    }//TODO: check error
+//
+//    printf("%" PRId64 "\n", result1->first * result2->first * result3->first);
+//
+//    free(future);
+//  }
+//
+//  thread_pool_destroy(&pool);
+//
+//  return 0;
+//}
+

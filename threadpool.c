@@ -5,45 +5,80 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
+#include <signal.h>
+#include "err.h"
+//#include <sys/types.h>
+#include <unistd.h>
 
-void syserr_silnia(const char *fmt, ...) {
-  va_list fmt_args;
+static queue *working_pools = NULL;
 
-  fprintf(stderr, "ERROR: ");
+static sem_t working_pools_mutex;
 
-  va_start(fmt_args, fmt);
-  vfprintf(stderr, fmt, fmt_args);
-  va_end (fmt_args);
-  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
-  exit(1);
+static void lib_init (void) __attribute__ ((constructor));
+
+static void lib_destroy (void) __attribute__ ((destructor));
+
+static thread_pool_t *delete_from_working_pools(thread_pool_t *pool) {
+  if (sem_wait(&working_pools_mutex)) {
+    syserr("sem_wait");
+  }
+  thread_pool_t *result = (thread_pool_t *) queue_delete(working_pools, pool);
+
+  if (sem_post(&working_pools_mutex)) {
+    syserr("sem_wait");
+  }
+  return result;
 }
+
+static int push_to_working_pools(thread_pool_t *pool) {
+  if (sem_wait(&working_pools_mutex)) {
+    syserr("sem_wait");
+  }
+  int result = queue_push(working_pools, pool);
+
+  if (sem_post(&working_pools_mutex)) {
+    syserr("sem_wait");
+  }
+  return result;
+}
+
+//void syserr(const char *fmt, ...) {
+//  va_list fmt_args;
+//
+//  fprintf(stderr, "ERROR: ");
+//  va_start(fmt_args, fmt);
+//  vfprintf(stderr, fmt, fmt_args);
+//  va_end (fmt_args);
+//  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
+//  exit(1);
+//}
 
 void *process(void *data) {
   assert(data);
   thread_pool_t *pool = (thread_pool_t *)(data);
 
   while (true) {
-    if (sem_wait(&(pool->queue_mutex))) syserr_silnia("sem_wait");// TODO: check error
+    if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait");// TODO: check error
 
     while (queue_size(pool->runnables) == 0) {
-      if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post");//TODO: check error
-      if (sem_wait(&(pool->runnables_semaphore))) syserr_silnia("sem_wait"); //TODO: check error
-      if (sem_wait(&(pool->queue_mutex))) syserr_silnia("sem_wait"); // TODO: check error
+      if (sem_post(&(pool->queue_mutex))) syserr("sem_post");//TODO: check error
+      if (sem_wait(&(pool->runnables_semaphore))) syserr("sem_wait"); //TODO: check error
+      if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait"); // TODO: check error
 
       if (pool->end && queue_size(pool->runnables) == 0) {
-        if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post");
+        if (sem_post(&(pool->queue_mutex))) syserr("sem_post");
         break;
       }
     }
 
     if (pool->end && queue_size(pool->runnables) == 0) {
-      if (sem_post(&(pool->queue_mutex)))syserr_silnia("sem_post");
+      if (sem_post(&(pool->queue_mutex)))syserr("sem_post");
       break;
     }
 
     runnable_t *runnable = queue_pop(pool->runnables);
 
-    if (sem_post(&(pool->queue_mutex))) syserr_silnia("sem_post"); //TODO: check error
+    if (sem_post(&(pool->queue_mutex))) syserr("sem_post"); //TODO: check error
 
     (runnable->function)(runnable->arg, runnable->argsz);
 
@@ -105,23 +140,23 @@ int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
     }
   }
 
-  return 0;
+  return push_to_working_pools(pool);
 }
 
-void thread_pool_destroy(struct thread_pool *pool) {
+static void raw_destroy(thread_pool_t *pool) {
   pool->end = true;
 
   if (pool->threads) {
     for (size_t i = 0; i < pool->size; i++) {
       if (sem_post(&(pool->runnables_semaphore))) {
-        syserr_silnia("sem_post");
+        syserr("sem_post");
       } //TODO: check error
     }
 
     for (size_t i = 0; i < pool->size; i++) {
       if (pool->threads[i]) {
         if (pthread_join(*(pool->threads[i]), NULL)) {
-          syserr_silnia("pthread_join");
+          syserr("pthread_join");
         }
         free(pool->threads[i]);
       }
@@ -130,7 +165,7 @@ void thread_pool_destroy(struct thread_pool *pool) {
   }
 
   if (pthread_attr_destroy(pool->attr)) {
-    syserr_silnia("pthread_attr_destroy");
+    syserr("pthread_attr_destroy");
   }
 
   if (pool->attr) {
@@ -140,12 +175,17 @@ void thread_pool_destroy(struct thread_pool *pool) {
   queue_destroy(pool->runnables);
 
   if (sem_destroy(&(pool->queue_mutex))) {
-    syserr_silnia("sem_destroy");
+    syserr("sem_destroy");
   }
 
   if (sem_destroy(&(pool->runnables_semaphore))) {
-    syserr_silnia("sem_destroy");
+    syserr("sem_destroy");
   }
+}
+
+void thread_pool_destroy(struct thread_pool *pool) {
+  raw_destroy(pool);
+  delete_from_working_pools(pool);
 }
 
 int defer(struct thread_pool *pool, runnable_t runnable) {
@@ -189,4 +229,48 @@ int defer(struct thread_pool *pool, runnable_t runnable) {
   }//TODO: check error
 
   return 0;
+}
+
+void catch(int sig) {
+  if (sem_wait(&working_pools_mutex)) {
+    syserr("sem init");
+  }
+  while (queue_size(working_pools) > 0) {
+    thread_pool_t *pool = queue_pop(working_pools);
+    raw_destroy(pool);
+    printf("sigint -> pool destroyed\n");
+    strsignal(sig);
+  }
+  if (sem_post(&working_pools_mutex)) {
+    syserr("sem post");
+  }
+}
+
+void lib_init (void) {
+  working_pools = queue_init();
+
+  if (sem_init(&working_pools_mutex, 0, 1) != 0) {
+    syserr("sem init");
+  }
+
+  struct sigaction action;
+  sigset_t block_mask;
+
+  sigemptyset(&block_mask);
+  sigaddset(&block_mask, SIGINT);
+
+  action.sa_handler = catch;
+  action.sa_mask = block_mask;
+  action.sa_flags = 0; //SA_RESETHAND;
+
+  if (sigaction(SIGINT, &action, 0) == -1) {
+    //TODO: error
+  }
+}
+
+void lib_destroy (void) {
+  queue_destroy(working_pools);
+  if (sem_destroy(&working_pools_mutex)) {
+    syserr("sem destroy");
+  }
 }

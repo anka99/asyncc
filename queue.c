@@ -1,8 +1,6 @@
 #include "queue.h"
 
 #include <stdlib.h>
-#include <assert.h>
-#include <stdio.h>
 
 queue *queue_init() {
   queue *q = malloc(sizeof(queue));
@@ -76,6 +74,9 @@ void queue_clear(queue *q) {
 }
 
 int queue_size(queue *q) {
+  if (!q) {
+    return 0;
+  }
   return q->size;
 }
 
@@ -84,4 +85,41 @@ void queue_destroy(queue *q) {
     queue_clear(q);
     free(q);
   }
+}
+
+void *queue_delete(queue *q, void *data) {
+  if (q->size == 0 || (q->head == q->tail && q->head->data != data)) {
+    return NULL;
+  }
+  if (q->head->data == data) {
+    node *temp = q->head;
+    if (q->tail == q->head) {
+      q->tail = NULL;
+    }
+    q->head = q->head->next;
+    void *result = temp->data;
+    (q->size)--;
+    free(temp);
+    return result;
+  }
+
+  node *temp = NULL;
+  node *temp_next = q->head;
+
+  while (temp_next != NULL) {
+    if (temp_next->data == data) {
+      if (temp_next == q->tail) {
+        q->tail = temp;
+      }
+      temp->next = temp_next->next;
+      void *result = temp_next->data;
+      (q->size)--;
+      free(temp_next);
+      return result;
+    }
+    temp = temp_next;
+    temp_next = temp_next->next;
+  }
+
+  return NULL;
 }
