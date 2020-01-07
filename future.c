@@ -1,6 +1,5 @@
 #include "future.h"
 #include <stdlib.h>
-#include <assert.h>
 #include <string.h>
 #include "err.h"
 
@@ -14,7 +13,7 @@ void function(void *args, size_t size __attribute__((unused))) {
   free(future->callable);
   if (sem_post(&(future->mutex))) {
     syserr("sem_post");
-  } //TODO: check error
+  }
 }
 
 int async(thread_pool_t *pool, future_t *future, callable_t callable) {
@@ -25,7 +24,7 @@ int async(thread_pool_t *pool, future_t *future, callable_t callable) {
   callable_t *callable_pointer = malloc(sizeof(callable_t));
   if (!callable_pointer) {
     return -1;
-  }//TODO: check error
+  }
 
   callable_pointer->function = callable.function;
   callable_pointer->arg = callable.arg;
@@ -36,12 +35,11 @@ int async(thread_pool_t *pool, future_t *future, callable_t callable) {
   if (err != 0) {
     free(callable_pointer);
     return err;
-  }//TODO: check error
+  }
 
   runnable.arg = future;
-  assert(sizeof(future_t) == sizeof(*future));
 
-  runnable.argsz = sizeof(future_t); //TODO: być może zainicjalizowane
+  runnable.argsz = sizeof(future_t);
 
   runnable.function = function;
 
@@ -69,7 +67,7 @@ void function_map(void *args, size_t size __attribute__((unused))) {
   free(future->callable);
   if (sem_post(&(future->mutex))) {
     syserr("sem_post");
-  } //TODO: check error
+  }
 }
 
 int map(thread_pool_t *pool, future_t *future, future_t *from,
@@ -79,7 +77,7 @@ int map(thread_pool_t *pool, future_t *future, future_t *from,
   err = sem_init(&(future->mutex), 0, 0);
   if (err != 0) {
     return err;
-  }//TODO: check error
+  }
 
   callable_t *callable = malloc(sizeof(callable_t));
   if (!callable) {
@@ -101,7 +99,7 @@ int map(thread_pool_t *pool, future_t *future, future_t *from,
   if (err != 0) {
     free(callable);
     return err;
-  }//TODO: check error
+  }
 
   return 0;
 }
@@ -109,11 +107,11 @@ int map(thread_pool_t *pool, future_t *future, future_t *from,
 void *await(future_t *future) {
   if (sem_wait(&(future->mutex))) {
     syserr("sem_wait");
-  } //TODO: check error
+  }
 
   if (sem_destroy(&(future->mutex))) {
     syserr("sem_destroy");
-  } //TODO: check error
+  }
 
   return future->result;
 }

@@ -1,11 +1,9 @@
-#include <pthread.h>
 #include <semaphore.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-//#include <zconf.h>
 
 #include "threadpool.h"
 
@@ -46,7 +44,7 @@ int main(void) {
   if (!results) {
     thread_pool_destroy(&pool);
     return -1;
-  }//TODO: error
+  }
 
   for (int i = 0; i < k; i++) {
     results[i] = 0;
@@ -64,7 +62,7 @@ int main(void) {
       thread_pool_destroy(&pool);
       free(results);
       return -1;
-    } //TODO: check error
+    }
   }
 
   int row = 0;
@@ -74,7 +72,7 @@ int main(void) {
     int v, t;
     scanf("%d %d", &v, &t);
 
-    data_t *data = malloc(sizeof(data_t)); //TODO: error
+    data_t *data = malloc(sizeof(data_t));
     if (!data) {
       thread_pool_destroy(&pool);
       free(results);
@@ -96,7 +94,7 @@ int main(void) {
       thread_pool_destroy(&pool);
       free(results);
       return -1;
-    } //TODO: check error
+    }
   }
 
   thread_pool_destroy(&pool);
@@ -107,7 +105,7 @@ int main(void) {
       thread_pool_destroy(&pool);
       free(results);
       return -1;
-    } //TODO: check error
+    }
   }
 
   free(mutex_array);

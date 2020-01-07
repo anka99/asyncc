@@ -2,13 +2,9 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
-#include <errno.h>
-#include <stdarg.h>
 #include <string.h>
 #include <signal.h>
 #include "err.h"
-//#include <sys/types.h>
-#include <unistd.h>
 
 static queue *working_pools = NULL;
 
@@ -42,28 +38,17 @@ static int push_to_working_pools(thread_pool_t *pool) {
   return result;
 }
 
-//void syserr(const char *fmt, ...) {
-//  va_list fmt_args;
-//
-//  fprintf(stderr, "ERROR: ");
-//  va_start(fmt_args, fmt);
-//  vfprintf(stderr, fmt, fmt_args);
-//  va_end (fmt_args);
-//  fprintf(stderr," (%d; %s)\n", errno, strerror(errno));
-//  exit(1);
-//}
-
 void *process(void *data) {
   assert(data);
   thread_pool_t *pool = (thread_pool_t *)(data);
 
   while (true) {
-    if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait");// TODO: check error
+    if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait");
 
     while (queue_size(pool->runnables) == 0) {
-      if (sem_post(&(pool->queue_mutex))) syserr("sem_post");//TODO: check error
-      if (sem_wait(&(pool->runnables_semaphore))) syserr("sem_wait"); //TODO: check error
-      if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait"); // TODO: check error
+      if (sem_post(&(pool->queue_mutex))) syserr("sem_post");
+      if (sem_wait(&(pool->runnables_semaphore))) syserr("sem_wait");
+      if (sem_wait(&(pool->queue_mutex))) syserr("sem_wait");
 
       if (pool->end && queue_size(pool->runnables) == 0) {
         if (sem_post(&(pool->queue_mutex))) syserr("sem_post");
@@ -78,7 +63,7 @@ void *process(void *data) {
 
     runnable_t *runnable = queue_pop(pool->runnables);
 
-    if (sem_post(&(pool->queue_mutex))) syserr("sem_post"); //TODO: check error
+    if (sem_post(&(pool->queue_mutex))) syserr("sem_post");
 
     (runnable->function)(runnable->arg, runnable->argsz);
 
@@ -88,61 +73,6 @@ void *process(void *data) {
   return 0;
 }
 
-int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
-  pool->size = num_threads;
-  pool->end = false;
-
-  if (!(pool->runnables = queue_init())) {
-    thread_pool_destroy(pool);
-    return -1;
-  }
-
-  int result = sem_init(&(pool->queue_mutex), 0, 1);
-  if (result != 0) {
-    thread_pool_destroy(pool);
-    return result;
-  }
-
-  result = sem_init(&(pool->runnables_semaphore), 0, 0);
-  if (result != 0) {
-    thread_pool_destroy(pool);
-    return result;
-  }
-
-  if (!(pool->attr = malloc(sizeof(pthread_attr_t)))) {
-    thread_pool_destroy(pool);
-    return result;
-  } //TODO: check error
-
-  if (!(pool->threads = malloc(pool->size * sizeof(pthread_t *)))) {
-    thread_pool_destroy(pool);
-    return result;
-  } //TODO: check error
-
-  result = pthread_attr_init(pool->attr);
-  if (result != 0) {
-    thread_pool_destroy(pool);
-    return result;
-  }
-
-  result = pthread_attr_setdetachstate (pool->attr,PTHREAD_CREATE_JOINABLE);
-  if (result != 0) {
-    thread_pool_destroy(pool);
-    return result;
-  }
-
-  for (size_t i = 0; i < pool->size; i++) {
-    pool->threads[i] = malloc(sizeof(pthread_t)); //TODO: error
-    result = pthread_create(pool->threads[i], pool->attr, process, pool);
-    if (result != 0) {
-      thread_pool_destroy(pool);
-      return result;
-    }
-  }
-
-  return push_to_working_pools(pool);
-}
-
 static void raw_destroy(thread_pool_t *pool) {
   pool->end = true;
 
@@ -150,7 +80,7 @@ static void raw_destroy(thread_pool_t *pool) {
     for (size_t i = 0; i < pool->size; i++) {
       if (sem_post(&(pool->runnables_semaphore))) {
         syserr("sem_post");
-      } //TODO: check error
+      }
     }
 
     for (size_t i = 0; i < pool->size; i++) {
@@ -183,6 +113,64 @@ static void raw_destroy(thread_pool_t *pool) {
   }
 }
 
+int thread_pool_init(thread_pool_t *pool, size_t num_threads) {
+  pool->size = num_threads;
+  pool->end = false;
+
+  if (!(pool->runnables = queue_init())) {
+    raw_destroy(pool);
+    return -1;
+  }
+
+  int result = sem_init(&(pool->queue_mutex), 0, 1);
+  if (result != 0) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  result = sem_init(&(pool->runnables_semaphore), 0, 0);
+  if (result != 0) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  if (!(pool->attr = malloc(sizeof(pthread_attr_t)))) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  if (!(pool->threads = malloc(pool->size * sizeof(pthread_t *)))) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  result = pthread_attr_init(pool->attr);
+  if (result != 0) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  result = pthread_attr_setdetachstate (pool->attr,PTHREAD_CREATE_JOINABLE);
+  if (result != 0) {
+    raw_destroy(pool);
+    return result;
+  }
+
+  for (size_t i = 0; i < pool->size; i++) {
+    pool->threads[i] = malloc(sizeof(pthread_t));
+    if (!pool->threads[i]) {
+      raw_destroy(pool);
+    }
+    result = pthread_create(pool->threads[i], pool->attr, process, pool);
+    if (result != 0) {
+      raw_destroy(pool);
+      return result;
+    }
+  }
+
+  return push_to_working_pools(pool);
+}
+
 void thread_pool_destroy(struct thread_pool *pool) {
   raw_destroy(pool);
   delete_from_working_pools(pool);
@@ -199,7 +187,7 @@ int defer(struct thread_pool *pool, runnable_t runnable) {
   runnable_t *runnable_pointer = malloc(sizeof(runnable_t));
   if (!runnable_pointer) {
     return -1;
-  }//TODO: check error
+  }
   runnable_pointer->arg = runnable.arg;
   runnable_pointer->argsz = runnable.argsz;
   runnable_pointer->function = runnable.function;
@@ -214,19 +202,19 @@ int defer(struct thread_pool *pool, runnable_t runnable) {
   if (result != 0) {
     free(runnable_pointer);
     return result;
-  } //TODO: check error
+  }
 
   result = sem_post(&(pool->runnables_semaphore));
   if (result != 0) {
     free(runnable_pointer);
     return result;
-  }//TODO: check error
+  }
 
   result = sem_post(&(pool->queue_mutex));
   if (result != 0) {
     free(runnable_pointer);
     return result;
-  }//TODO: check error
+  }
 
   return 0;
 }
@@ -261,10 +249,10 @@ void lib_init (void) {
 
   action.sa_handler = catch;
   action.sa_mask = block_mask;
-  action.sa_flags = 0; //SA_RESETHAND;
+  action.sa_flags = 0;
 
   if (sigaction(SIGINT, &action, 0) == -1) {
-    //TODO: error
+    syserr("sigaction");
   }
 }
 
