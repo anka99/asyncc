@@ -1,3 +1,7 @@
+/*
+ * The example of thread pool usage.
+ */
+
 #include <semaphore.h>
 #include <stddef.h>
 #include <stdint.h>

@@ -4,7 +4,7 @@
 #include "threadpool.h"
 
 typedef struct callable {
-  void *(*function)(void *, size_t, size_t *); //size_t * - rozmiar wyniku
+  void *(*function)(void *, size_t, size_t *);
   void *arg;
   size_t argsz;
 } callable_t;
